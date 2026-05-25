@@ -7,6 +7,9 @@ app = Flask(__name__)
 # CLAVE SESION
 app.secret_key = "sensor123"
 
+# CONTRASEÑA ADMIN
+ADMIN_PASSWORD = "121102"
+
 # BASE DE DATOS
 conexion = sqlite3.connect('sensor.db', check_same_thread=False)
 cursor = conexion.cursor()
@@ -41,30 +44,22 @@ def login():
         usuario = request.form['usuario']
         password = request.form['password']
 
-        if password == "24250510":
+        # LOGIN CORRECTO (cualquier usuario entra)
+        session['usuario'] = usuario
 
-            session['usuario'] = usuario
+        # GUARDAR VISITA
+        ip = request.remote_addr
+        navegador = request.user_agent.string
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            # GUARDAR VISITA
-            ip = request.remote_addr
-            navegador = request.user_agent.string
-            fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            "INSERT INTO visitas (ip, navegador, fecha) VALUES (?, ?, ?)",
+            (ip, navegador, fecha)
+        )
 
-            cursor.execute(
-                "INSERT INTO visitas (ip, navegador, fecha) VALUES (?, ?, ?)",
-                (ip, navegador, fecha)
-            )
+        conexion.commit()
 
-            conexion.commit()
-
-            return redirect('/grafica')
-
-        else:
-
-            return '''
-            <h1>Contraseña incorrecta</h1>
-            <a href="/">Volver</a>
-            '''
+        return redirect('/grafica')
 
     return '''
 
@@ -93,9 +88,7 @@ def login():
 # CERRAR SESION
 @app.route('/logout')
 def logout():
-
     session.clear()
-
     return redirect('/')
 
 # GUARDAR DATOS SENSOR
@@ -122,7 +115,6 @@ def grafica():
         return redirect('/')
 
     cursor.execute("SELECT * FROM temperatura ORDER BY id DESC LIMIT 20")
-
     datos = cursor.fetchall()
 
     html = """
@@ -158,23 +150,17 @@ def grafica():
     <table border="1" style="margin:auto; margin-top:20px;">
 
     <tr>
-
     <th>ID</th>
     <th>Temperatura</th>
     <th>Humedad</th>
-
     </tr>
 
     {% for fila in datos %}
-
     <tr>
-
     <td>{{ fila[0] }}</td>
     <td>{{ fila[1] }}</td>
     <td>{{ fila[2] }}</td>
-
     </tr>
-
     {% endfor %}
 
     </table>
@@ -182,11 +168,8 @@ def grafica():
     <script>
 
     const datos = {{ datos|tojson }};
-
     const temperaturas = datos.map(x => x[1]);
-
     const humedad = datos.map(x => x[2]);
-
     const etiquetas = datos.map(x => x[0]);
 
     new Chart(document.getElementById('grafica'), {
@@ -200,19 +183,13 @@ def grafica():
             datasets: [
 
             {
-
                 label: 'Temperatura',
-
                 data: temperaturas
-
             },
 
             {
-
                 label: 'Humedad',
-
                 data: humedad
-
             }
 
             ]
@@ -224,22 +201,56 @@ def grafica():
     </script>
 
     </body>
-
     </html>
 
     """
 
     return render_template_string(html, datos=datos)
 
-# PANEL ADMIN
-@app.route('/admin')
+# PANEL ADMIN (PROTEGIDO)
+@app.route('/admin', methods=['GET', 'POST'])
 def admin():
 
     if 'usuario' not in session:
         return redirect('/')
 
-    cursor.execute("SELECT * FROM visitas ORDER BY id DESC")
+    # SI NO HA INGRESADO CONTRASEÑA ADMIN
+    if not session.get('admin'):
 
+        if request.method == 'POST':
+
+            password = request.form['password']
+
+            if password == ADMIN_PASSWORD:
+                session['admin'] = True
+                return redirect('/admin')
+            else:
+                return '''
+                <h1>Contraseña incorrecta</h1>
+                <a href="/admin">Volver</a>
+                '''
+
+        return '''
+
+        <html>
+        <body style="font-family:Arial; text-align:center; margin-top:100px;">
+
+        <h1>Acceso Admin</h1>
+
+        <form method="POST">
+            <input type="password" name="password" placeholder="Contraseña admin" required><br><br>
+            <button type="submit">Entrar</button>
+        </form>
+
+        <a href="/grafica">Volver</a>
+
+        </body>
+        </html>
+
+        '''
+
+    # SI YA ES ADMIN
+    cursor.execute("SELECT * FROM visitas ORDER BY id DESC")
     visitas = cursor.fetchall()
 
     html = """
@@ -254,28 +265,28 @@ def admin():
     <button>Volver</button>
     </a>
 
+    <a href="/logout">
+    <button>Cerrar Sesión</button>
+    </a>
+
     <br><br>
 
     <table border="1" style="margin:auto;">
 
     <tr>
-
     <th>ID</th>
     <th>IP</th>
     <th>Navegador</th>
     <th>Fecha</th>
-
     </tr>
 
     {% for fila in visitas %}
 
     <tr>
-
     <td>{{ fila[0] }}</td>
     <td>{{ fila[1] }}</td>
     <td>{{ fila[2] }}</td>
     <td>{{ fila[3] }}</td>
-
     </tr>
 
     {% endfor %}
@@ -283,7 +294,6 @@ def admin():
     </table>
 
     </body>
-
     </html>
 
     """
@@ -291,5 +301,4 @@ def admin():
     return render_template_string(html, visitas=visitas)
 
 if __name__ == '__main__':
-
     app.run(host='0.0.0.0', port=10000)
