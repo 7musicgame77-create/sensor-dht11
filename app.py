@@ -1,9 +1,10 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, redirect
+
 import sqlite3
 
 app = Flask(__name__)
 
-# CREAR BASE DE DATOS
+# BASE DE DATOS
 conexion = sqlite3.connect('sensor.db', check_same_thread=False)
 cursor = conexion.cursor()
 
@@ -16,6 +17,53 @@ CREATE TABLE IF NOT EXISTS temperatura (
 ''')
 
 conexion.commit()
+
+# LOGIN
+@app.route('/', methods=['GET', 'POST'])
+
+def login():
+
+    if request.method == 'POST':
+
+        password = request.form['password']
+
+        if password == "24250510":
+
+            return redirect('/grafica')
+
+        else:
+
+            return '''
+
+            <h1>Contraseña incorrecta</h1>
+
+            <a href="/">Volver</a>
+
+            '''
+
+    return '''
+
+    <html>
+
+    <body style="font-family:Arial; text-align:center; margin-top:100px;">
+
+    <h1>LOGIN SENSOR DHT11</h1>
+
+    <form method="POST">
+
+    <input type="text" placeholder="Usuario" required><br><br>
+
+    <input type="password" name="password" placeholder="Contraseña" required><br><br>
+
+    <button type="submit">Entrar</button>
+
+    </form>
+
+    </body>
+
+    </html>
+
+    '''
 
 # GUARDAR DATOS
 @app.route('/guardar')
@@ -34,10 +82,10 @@ def guardar():
 
     return "Datos guardados"
 
-# PAGINA PRINCIPAL
-@app.route('/')
+# GRAFICA
+@app.route('/grafica')
 
-def inicio():
+def grafica():
 
     cursor.execute("SELECT * FROM temperatura ORDER BY id DESC LIMIT 20")
 
