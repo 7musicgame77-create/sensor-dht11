@@ -2,288 +2,262 @@ from flask import Flask, request, render_template_string, redirect, session, sen
 import sqlite3
 from datetime import datetime
 import csv
-import os
 
 app = Flask(__name__)
-
-# CLAVE SESION
 app.secret_key = "sensor123"
 
-# CONTRASEÑA ADMIN
-ADMIN_PASSWORD = "121102"
+API_KEY = "ARDUINO123"
 
-# BASE DE DATOS (UN SOLO ARCHIVO CENTRAL)
-conexion = sqlite3.connect('sensor.db', check_same_thread=False)
+conexion = sqlite3.connect("sensor.db", check_same_thread=False)
 cursor = conexion.cursor()
 
-# =========================
-# TABLA SENSOR (AHORA CON FECHA)
-# =========================
-cursor.execute('''
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS usuarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario TEXT UNIQUE,
+    password TEXT,
+    rol TEXT
+)
+""")
+
+cursor.execute("""
 CREATE TABLE IF NOT EXISTS temperatura (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     temp REAL,
     humedad REAL,
-    fecha TEXT
+    fecha TEXT,
+    usuario_envio TEXT
 )
-''')
+""")
 
-# =========================
-# TABLA VISITAS
-# =========================
-cursor.execute('''
+cursor.execute("""
 CREATE TABLE IF NOT EXISTS visitas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ip TEXT,
     navegador TEXT,
     fecha TEXT
 )
-''')
+""")
+
+cursor.execute("""
+INSERT OR IGNORE INTO usuarios(usuario,password,rol)
+VALUES ('admin','121102','admin')
+""")
+
+cursor.execute("""
+INSERT OR IGNORE INTO usuarios(usuario,password,rol)
+VALUES ('consulta','1234','consulta')
+""")
 
 conexion.commit()
 
-# LOGIN
-@app.route('/', methods=['GET', 'POST'])
+@app.route("/", methods=["GET","POST"])
 def login():
-
-    if request.method == 'POST':
-
-        usuario = request.form['usuario']
-        password = request.form['password']
-
-        session['usuario'] = usuario
-
-        ip = request.remote_addr
-        navegador = request.user_agent.string
-        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if request.method == "POST":
+        usuario = request.form["usuario"]
+        password = request.form["password"]
 
         cursor.execute(
-            "INSERT INTO visitas (ip, navegador, fecha) VALUES (?, ?, ?)",
-            (ip, navegador, fecha)
+            "SELECT usuario, rol FROM usuarios WHERE usuario=? AND password=?",
+            (usuario,password)
         )
+        user = cursor.fetchone()
 
-        conexion.commit()
+        if user:
+            session["usuario"] = user[0]
+            session["rol"] = user[1]
 
-        return redirect('/grafica')
+            cursor.execute(
+                "INSERT INTO visitas(ip,navegador,fecha) VALUES(?,?,?)",
+                (
+                    request.remote_addr,
+                    request.user_agent.string,
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                )
+            )
+            conexion.commit()
 
-    return '''
-    <html>
-    <body style="font-family:Arial; text-align:center; margin-top:100px;">
+            return redirect("/grafica")
+
+        return "<h1>Login incorrecto</h1><a href='/'>Volver</a>"
+
+    return """
+    <html><body style='font-family:Arial;text-align:center;margin-top:100px;'>
     <h1>LOGIN SENSOR DHT11</h1>
-
-    <form method="POST">
-    <input type="text" name="usuario" placeholder="Usuario" required><br><br>
-    <input type="password" name="password" placeholder="Contraseña" required><br><br>
-    <button type="submit">Entrar</button>
+    <form method='POST'>
+    <input name='usuario' placeholder='Usuario'><br><br>
+    <input type='password' name='password' placeholder='Contraseña'><br><br>
+    <button>Entrar</button>
     </form>
+    </body></html>
+    """
 
-    </body>
-    </html>
-    '''
-
-# LOGOUT
-@app.route('/logout')
+@app.route("/logout")
 def logout():
     session.clear()
-    return redirect('/')
+    return redirect("/")
 
-# GUARDAR SENSOR
-@app.route('/guardar')
+@app.route("/guardar")
 def guardar():
+    key = request.args.get("key")
+    usuario = request.args.get("user")
+    temp = request.args.get("temp")
+    humedad = request.args.get("humedad")
 
-    temp = request.args.get('temp')
-    humedad = request.args.get('humedad')
-    fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if key != API_KEY:
+        return "NO AUTORIZADO", 401
+
+    cursor.execute("SELECT * FROM usuarios WHERE usuario=?", (usuario,))
+    if not cursor.fetchone():
+        return "USUARIO INVALIDO", 401
 
     cursor.execute(
-        "INSERT INTO temperatura (temp, humedad, fecha) VALUES (?, ?, ?)",
-        (temp, humedad, fecha)
+        "INSERT INTO temperatura(temp,humedad,fecha,usuario_envio) VALUES(?,?,?,?)",
+        (
+            temp,
+            humedad,
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            usuario
+        )
     )
-
     conexion.commit()
 
-    return "Datos guardados"
+    return "OK"
 
-# GRAFICA
-@app.route('/grafica')
+@app.route("/grafica")
 def grafica():
+    if "usuario" not in session:
+        return redirect("/")
 
-    if 'usuario' not in session:
-        return redirect('/')
+    if session["rol"] == "consulta":
+        hoy = datetime.now().strftime("%Y-%m-%d")
+        cursor.execute(
+            "SELECT * FROM temperatura WHERE fecha LIKE ? ORDER BY id DESC LIMIT 100",
+            (hoy + "%",)
+        )
+    else:
+        fecha = request.args.get("fecha")
+        if fecha:
+            cursor.execute(
+                "SELECT * FROM temperatura WHERE fecha LIKE ? ORDER BY id DESC",
+                (fecha + "%",)
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM temperatura ORDER BY id DESC LIMIT 100"
+            )
 
-    cursor.execute("SELECT * FROM temperatura ORDER BY id DESC LIMIT 20")
     datos = cursor.fetchall()
 
     html = """
-
     <html>
     <head>
-    <title>DHT11 ONLINE</title>
-    <meta http-equiv="refresh" content="5">
+    <meta http-equiv="refresh" content="10">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     </head>
+    <body style="font-family:Arial;text-align:center;">
 
-    <body style="font-family: Arial; text-align:center;">
-
-    <h1>Sensor DHT11 Online</h1>
+    <h1>Dashboard IoT</h1>
 
     <a href="/logout"><button>Cerrar Sesión</button></a>
-    <a href="/admin"><button>Panel Admin</button></a>
-    <a href="/descargar"><button>Descargar Base de Datos</button></a>
 
-    <br><br>
+    {% if session['rol'] == 'admin' %}
+    <a href="/admin"><button>Panel Admin</button></a>
+
+    <form method="GET" action="/grafica">
+    <input type="date" name="fecha">
+    <button type="submit">Buscar Fecha</button>
+    </form>
+    {% endif %}
 
     <canvas id="grafica"></canvas>
 
-    <table border="1" style="margin:auto; margin-top:20px;">
+    <table border="1" style="margin:auto;">
     <tr>
     <th>ID</th>
-    <th>Temperatura</th>
+    <th>Temp</th>
     <th>Humedad</th>
     <th>Fecha</th>
+    <th>Usuario</th>
     </tr>
 
     {% for fila in datos %}
     <tr>
-    <td>{{ fila[0] }}</td>
-    <td>{{ fila[1] }}</td>
-    <td>{{ fila[2] }}</td>
-    <td>{{ fila[3] }}</td>
+    <td>{{fila[0]}}</td>
+    <td>{{fila[1]}}</td>
+    <td>{{fila[2]}}</td>
+    <td>{{fila[3]}}</td>
+    <td>{{fila[4]}}</td>
     </tr>
     {% endfor %}
-
     </table>
 
     <script>
-
     const datos = {{ datos|tojson }};
-    const temperaturas = datos.map(x => x[1]);
-    const humedad = datos.map(x => x[2]);
-    const etiquetas = datos.map(x => x[0]);
-
-    new Chart(document.getElementById('grafica'), {
-
-        type: 'line',
-
-        data: {
-
-            labels: etiquetas,
-
-            datasets: [
-
-            {
-                label: 'Temperatura',
-                data: temperaturas
-            },
-
-            {
-                label: 'Humedad',
-                data: humedad
-            }
-
-            ]
-
-        }
-
+    new Chart(document.getElementById('grafica'),{
+      type:'line',
+      data:{
+        labels:datos.map(x=>x[0]),
+        datasets:[
+          {label:'Temperatura',data:datos.map(x=>x[1])},
+          {label:'Humedad',data:datos.map(x=>x[2])}
+        ]
+      }
     });
-
     </script>
 
     </body>
     </html>
-
     """
-
     return render_template_string(html, datos=datos)
 
-# =========================
-# DESCARGAR BASE DE DATOS COMPLETA
-# =========================
-@app.route('/descargar')
-def descargar():
-
-    if 'usuario' not in session:
-        return redirect('/')
-
-    archivo = "sensor_completo.csv"
-
-    cursor.execute("SELECT * FROM temperatura")
-    datos = cursor.fetchall()
-
-    with open(archivo, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["ID", "Temperatura", "Humedad", "Fecha"])
-        writer.writerows(datos)
-
-    return send_file(archivo, as_attachment=True)
-
-# PANEL ADMIN
-@app.route('/admin', methods=['GET', 'POST'])
+@app.route("/admin")
 def admin():
-
-    if 'usuario' not in session:
-        return redirect('/')
-
-    if not session.get('admin'):
-
-        if request.method == 'POST':
-
-            password = request.form['password']
-
-            if password == ADMIN_PASSWORD:
-                session['admin'] = True
-                return redirect('/admin')
-            else:
-                return "<h1>Contraseña incorrecta</h1><a href='/admin'>Volver</a>"
-
-        return '''
-        <html>
-        <body style="font-family:Arial; text-align:center; margin-top:100px;">
-        <h1>Acceso Admin</h1>
-
-        <form method="POST">
-        <input type="password" name="password" required>
-        <button>Entrar</button>
-        </form>
-
-        <a href="/grafica">Volver</a>
-        </body>
-        </html>
-        '''
+    if session.get("rol") != "admin":
+        return "NO AUTORIZADO"
 
     cursor.execute("SELECT * FROM visitas ORDER BY id DESC")
     visitas = cursor.fetchall()
 
     return render_template_string("""
-    <html>
-    <body style="font-family:Arial; text-align:center;">
-    <h1>Registro de Usuarios</h1>
+    <h1>Panel Administrador</h1>
 
     <a href="/grafica"><button>Volver</button></a>
     <a href="/logout"><button>Cerrar Sesión</button></a>
+    <a href="/descargar"><button>Descargar CSV</button></a>
 
-    <br><br>
+    <table border="1">
+    <tr><th>ID</th><th>IP</th><th>Navegador</th><th>Fecha</th></tr>
 
-    <table border="1" style="margin:auto;">
+    {% for v in visitas %}
     <tr>
-    <th>ID</th><th>IP</th><th>Navegador</th><th>Fecha</th>
-    </tr>
-
-    {% for fila in visitas %}
-    <tr>
-    <td>{{ fila[0] }}</td>
-    <td>{{ fila[1] }}</td>
-    <td>{{ fila[2] }}</td>
-    <td>{{ fila[3] }}</td>
+    <td>{{v[0]}}</td>
+    <td>{{v[1]}}</td>
+    <td>{{v[2]}}</td>
+    <td>{{v[3]}}</td>
     </tr>
     {% endfor %}
-
     </table>
-
-    </body>
-    </html>
     """, visitas=visitas)
 
-# =========================
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+@app.route("/descargar")
+def descargar():
+    if session.get("rol") != "admin":
+        return "NO AUTORIZADO"
+
+    archivo = "sensores.csv"
+
+    cursor.execute("SELECT * FROM temperatura")
+    datos = cursor.fetchall()
+
+    with open(archivo, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["ID","TEMP","HUMEDAD","FECHA","USUARIO"])
+        writer.writerows(datos)
+
+    return send_file(archivo, as_attachment=True)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
+
+
