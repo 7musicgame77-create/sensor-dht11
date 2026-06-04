@@ -268,6 +268,45 @@ def descargar():
         writer.writerows(datos)
 
     return send_file(archivo, as_attachment=True)
+    
+    @app.route("/ver_db")
+def ver_db():
+
+    cursor.execute("""
+    SELECT *
+    FROM temperatura
+    ORDER BY id DESC
+    """)
+
+    datos = cursor.fetchall()
+
+    html = """
+    <h1>Base de Datos SQLite</h1>
+
+    <table border='1'>
+    <tr>
+        <th>ID</th>
+        <th>Temperatura</th>
+        <th>Humedad</th>
+        <th>Fecha</th>
+        <th>Usuario</th>
+    </tr>
+    """
+
+    for fila in datos:
+        html += f"""
+        <tr>
+            <td>{fila[0]}</td>
+            <td>{fila[1]}</td>
+            <td>{fila[2]}</td>
+            <td>{fila[3]}</td>
+            <td>{fila[4]}</td>
+        </tr>
+        """
+
+    html += "</table>"
+
+    return html
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
