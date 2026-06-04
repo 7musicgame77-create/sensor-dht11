@@ -4,6 +4,11 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import csv
 
+def fecha_actual():
+    return datetime.now(
+        ZoneInfo("America/Mexico_City")
+    ).strftime("%Y-%m-%d %H:%M:%S")
+
 app = Flask(__name__)
 app.secret_key = "sensor123"
 
