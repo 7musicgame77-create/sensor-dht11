@@ -78,7 +78,7 @@ def login():
                 (
                     request.remote_addr,
                     request.user_agent.string,
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    fecha_actual()
                 )
             )
             conexion.commit()
@@ -122,7 +122,7 @@ def guardar():
         (
             temp,
             humedad,
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            fecha_actual(),
             usuario
         )
     )
@@ -136,7 +136,7 @@ def grafica():
         return redirect("/")
 
     if session["rol"] == "consulta":
-        hoy = datetime.now().strftime("%Y-%m-%d")
+        hoy = fecha_actual()[:10]
         cursor.execute(
             "SELECT * FROM temperatura WHERE fecha LIKE ? ORDER BY id DESC LIMIT 100",
             (hoy + "%",)
@@ -154,6 +154,7 @@ def grafica():
             )
 
     datos = cursor.fetchall()
+    fecha_servidor = fecha_actual()
 
     html = """
     <html>
@@ -164,6 +165,7 @@ def grafica():
     <body style="font-family:Arial;text-align:center;">
 
     <h1>Dashboard IoT</h1>
+    <h3>Fecha y hora del servidor: {{ fecha_servidor }}</h3>
 
     <a href="/logout"><button>Cerrar Sesión</button></a>
 
@@ -215,7 +217,11 @@ def grafica():
     </body>
     </html>
     """
-    return render_template_string(html, datos=datos)
+    return render_template_string(
+        html,
+        datos=datos,
+        fecha_servidor=fecha_servidor
+    )
 
 @app.route("/admin")
 def admin():
@@ -265,5 +271,3 @@ def descargar():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
-
